@@ -7,6 +7,7 @@ betas:
 - 0.9
 - 0.999
 batchsize: 64
+checkpoint: checkpoints/weights.pth
 data: dataset/data/train.pkl
 debug: false
 decoder_args:

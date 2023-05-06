@@ -95,7 +95,7 @@ def get_model(args):
 
 
 def get_encoder(args):
-    class ViTWithCustomForward(timm.models.VisionTransformer):
+    class ViTWithCustomForward(timm.models.vision_transformer.VisionTransformer):
         def __init__(self, img_size=224, patch_size=16, *args, **kwargs):
             super(ViTWithCustomForward, self).__init__(img_size=img_size, patch_size=patch_size, *args, **kwargs)
             self.height, self.width = img_size

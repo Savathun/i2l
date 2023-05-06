@@ -29,7 +29,7 @@ class Model(nn.Module):
         return self.decoder(t, context=self.encoder(x), **kwargs)
 
     @torch.no_grad()
-    def generate(self, x: torch.Tensor, temperature: float = 0.25):
+    def generate(self, x: torch.Tensor, temperature=0.25):
         return self.decoder.generate((torch.LongTensor([utils.BOS_ID] * len(x))[:, None]).to(x.device),
                                      self.args.max_seq_len,
                                      context=self.encoder(x), temperature=temperature)
@@ -43,39 +43,26 @@ def get_model(args):
         @torch.no_grad()
         def generate(self, start_tokens, seq_len=256, temperature=1., filter_logits_fn=autoregressive_wrapper.top_k,
                      filter_thres=0.9, **kwargs):
-            num_dims = len(start_tokens.shape)
-
-            if num_dims == 1:
+            if (num_dims := len(start_tokens.shape)) == 1:
                 start_tokens = start_tokens[None, :]
-
             b, t = start_tokens.shape
-
             self.net.eval()
             out = start_tokens
-            mask = kwargs.pop('mask', None)
-            if not mask:
+            if not (mask := kwargs.pop('mask', None)):
                 mask = torch.full_like(out, True, dtype=torch.bool, device=out.device)
-
             for _ in range(seq_len):
                 x = out[:, -self.max_seq_len:]
-                mask = mask[:, -self.max_seq_len:]
-                logits = self.net(x, mask=mask, **kwargs)[:, -1, :]
-
+                logits = self.net(x, mask=(mask := mask[:, -self.max_seq_len:]), **kwargs)[:, -1, :]
                 if filter_logits_fn in {autoregressive_wrapper.top_k, autoregressive_wrapper.top_p}:
                     filtered_logits = filter_logits_fn(logits, thres=filter_thres)
                     probs = nn.functional.softmax(filtered_logits / temperature, dim=-1)
-
                 out = torch.cat((out, torch.multinomial(probs, 1)), dim=-1)
                 mask = nn.functional.pad(mask, (0, 1), value=True)
-
                 if utils.EOS_ID and (torch.cumsum(out == utils.EOS_ID, 1)[:, -1] >= 1).all():
                     break
-
             out = out[:, t:]
-
             if num_dims == 1:
                 out = out.squeeze(0)
-
             self.net.train(self.net.training)
             return out
 
@@ -83,10 +70,7 @@ def get_model(args):
                                                  attn_layers=Decoder(dim=args.dim, depth=ENCODER_LAYERS,
                                                                      heads=HEADS, **args.decoder_args)),
                                           pad_value=utils.PAD_ID)
-    encoder = get_encoder(args)
-    encoder.to(args.device)
-    decoder.to(args.device)
-    model = Model(encoder, decoder, args)
+    model = Model(get_encoder(args).to(args.device), decoder.to(args.device), args)
     if args.wandb:
         import wandb
         wandb.watch(model)
@@ -104,11 +88,11 @@ def get_encoder(args):
         def forward_features(self, x):
             B, c, h, w = x.shape
             h, w = h // self.patch_size, w // self.patch_size
-            x = self.pos_drop(torch.cat((self.cls_token.expand(B, -1, -1), self.patch_embed(x)), dim=1) +
-                              self.pos_embed[:,
-                              torch.cat((torch.zeros(1), einops.repeat(torch.arange(h) * (self.width // self.patch_size - w),
-                                                                'h -> (h w)', w=w) + torch.arange(h * w) + 1),
-                                        dim=0).long()])
+            x = self.pos_drop(
+                torch.cat((self.cls_token.expand(B, -1, -1), self.patch_embed(x)), dim=1) +
+                self.pos_embed[:, torch.cat((torch.zeros(1), einops.repeat(
+                    torch.arange(h) * (self.width // self.patch_size - w),
+                    'h -> (h w)', w=w) + torch.arange(h * w) + 1), dim=0).long()])
             for blk in self.blocks:
                 x = blk(x)
             return self.norm(x)
@@ -124,7 +108,6 @@ def get_encoder(args):
         return timm.models.vision_transformer_hybrid.HybridEmbed(**x, patch_size=ps // min_patch_size,
                                                                  backbone=backbone)
 
-    encoder = ViTWithCustomForward(img_size=(args.max_height, args.max_width), patch_size=args.patch_size,
+    return ViTWithCustomForward(img_size=(args.max_height, args.max_width), patch_size=args.patch_size,
                                       in_chans=utils.CHANNELS, num_classes=0, embed_dim=args.dim,
                                       depth=ENCODER_DEPTH, num_heads=HEADS, embed_layer=embed_layer)
-    return encoder

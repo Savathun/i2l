@@ -149,8 +149,7 @@ class Im2LatexDataset:
     def _get_size(self):
         self.size = 0
         for k in self.data:
-            div, mod = divmod(len(self.data[k]), self.batchsize)
-            self.size += div
+            self.size += divmod(len(self.data[k]), self.batchsize)[0]
 
     def combine(self, x):
         for key in x.data.keys():
@@ -200,9 +199,9 @@ def generate_tokenizer(equations, output, vocab_size):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train model', add_help=False)
-    parser.add_argument('-i', '--images', type=str, nargs='+', default=None, help='Image folders')
-    parser.add_argument('-e', '--equations', type=str, nargs='+', default=None, help='equations text files')
-    parser.add_argument('-t', '--tokenizer', default=None, help='Pretrained tokenizer file')
+    parser.add_argument('-i', '--images', type=str, default=None, help='image folder')
+    parser.add_argument('-e', '--equations', type=str, default=None, help='equations text file')
+    parser.add_argument('-t', '--tokenizer', default=None, help='pretrained tokenizer file')
     parser.add_argument('-o', '--out', type=str, required=True, help='output file')
     parser.add_argument('-s', '--vocab-size', default=8000, type=int, help='vocabulary size when training a tokenizer')
     if not (args := parser.parse_args()).tokenizer:

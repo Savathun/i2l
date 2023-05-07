@@ -30,9 +30,8 @@ def parse_args(args, **kwargs) -> munch.Munch:
                 args.gpu_devices) < available_gpus, f"legal gpu_devices should in [{','.join(map(str, range(available_gpus)))}], received [{','.join(map(str, args.gpu_devices))}]"
         return device
 
-    kwargs = munch.Munch({'no_cuda': False, 'debug': False}, **kwargs)
+    kwargs = munch.Munch({'no_cuda': False}, **kwargs)
     args.update(kwargs)
-    args.wandb = not kwargs.debug and not args.debug
     args.device = get_device(kwargs.no_cuda)
     args.max_dimensions = [args.max_width, args.max_height]
     args.min_dimensions = [args.get('min_width', 32), args.get('min_height', 32)]
@@ -62,20 +61,17 @@ def gpu_memory_check(model, args):
 def token2str(tokens, tokenizer) -> list:
     if len(tokens.shape) == 1:
         tokens = tokens[None, :]
-    return [''.join(detok.split(' ')).replace('Ġ', ' ').replace(EOS, '').replace(BOS, '').replace(PAD,
-                                                                                                  '').strip()
-            for detok in [tokenizer.decode(tok) for tok in tokens]]
+    return [''.join(d.split(' ')).replace('Ġ', ' ').replace(EOS, '').replace(BOS, '').replace(PAD, '').strip()
+            for d in [tokenizer.decode(tok) for tok in tokens]]
 
 
-def pad(img: Image, divable: int = 32) -> Image:
-    threshold = 128
-    data = numpy.array(img.convert('LA'))
-    if data[..., -1].var() == 0:
+def pad(img: Image, divisor=32) -> Image:
+    if (data := numpy.array(img.convert('LA')))[..., -1].var() == 0:
         data = (data[..., 0]).astype(numpy.uint8)
     else:
         data = (255 - data[..., -1]).astype(numpy.uint8)
     data = (data - data.min()) / (data.max() - data.min()) * 255
-    if data.mean() > threshold:
+    if data.mean() > (threshold := 128):
         gray = 255 * (data < threshold).astype(numpy.uint8)
     else:
         gray = 255 * (data > threshold).astype(numpy.uint8)
@@ -83,8 +79,8 @@ def pad(img: Image, divable: int = 32) -> Image:
     a, b, w, h = cv2.boundingRect(cv2.findNonZero(gray))
     dims = []
     for x in [w, h]:
-        div, mod = divmod(x, divable)
-        dims.append(divable * (div + (1 if mod > 0 else 0)))
+        div, mod = divmod(x, divisor)
+        dims.append(divisor * (div + (1 if mod > 0 else 0)))
     padded = Image.new('L', dims, 255)
     im = Image.fromarray(data[b:b + h, a:a + w]).convert('L')
     padded.paste(im, (0, 0, im.size[0], im.size[1]))

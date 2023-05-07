@@ -48,7 +48,7 @@ def load(filename):
         return pickle.load(file)
 
 
-class Im2LatexDataset:
+class I2LDataset:
     keep_smaller_batches = False
     shuffle = True
     batchsize = 16
@@ -215,9 +215,9 @@ if __name__ == '__main__':
         dataset = None
         for images, equations in zip(args.images, args.equations):
             if not dataset:
-                dataset = Im2LatexDataset(equations, images, args.tokenizer)
+                dataset = I2LDataset(equations, images, args.tokenizer)
             else:
-                dataset.combine(Im2LatexDataset(equations, images, args.tokenizer))
+                dataset.combine(I2LDataset(equations, images, args.tokenizer))
         dataset.update(batchsize=1, keep_smaller_batches=True)
         dataset.save(args.out)
     else:

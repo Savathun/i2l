@@ -43,3 +43,4 @@ testbatchsize: 20
 tokenizer: dataset/tokenizer.json
 valbatches: 100
 valdata: dataset/data/val.pkl
+wandb: True

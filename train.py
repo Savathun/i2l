@@ -89,7 +89,7 @@ def train(args):
 
 
 @torch.no_grad()
-def evaluate(model: Model, dataset: dataset.Im2LatexDataset, args: Munch, num_batches: int = None, name: str = 'test'):
+def evaluate(model: Model, dataset: dataset.I2LDataset, args: Munch, num_batches: int = None, name: str = 'test'):
     def detokenize(tokens, tokenizer):
         toks = [tokenizer.convert_ids_to_tokens(tok) for tok in tokens]
         for b in range(len(toks)):

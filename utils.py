@@ -46,7 +46,7 @@ def gpu_memory_check(model, args):
         for _ in range(5):
             im = torch.empty(batch_size, CHANNELS, args.max_height, args.min_height, device=args.device).float()
             seq = torch.randint(0, args.num_tokens, (batch_size, args.max_seq_len), device=args.device).long()
-            loss = model.data_parallel(im, device_ids=args.gpu_devices, tgt_seq=seq)
+            loss = model.data_parallel(im, device_ids=args.gpu_devices, t=seq)
             loss.sum().backward()
     except RuntimeError:
         raise RuntimeError(
@@ -87,7 +87,7 @@ def pad(img: Image, divisor=32) -> Image:
     return padded
 
 
-def post_process(s: str):
+def post_process(s: str) -> str:
     text_reg = r'(\\(operatorname|mathrm|text|mathbf)\s?\*? {.*?})'
     letter, no_letter = '[a-zA-Z]', r'[\W_^\d]'
     names = [x[0].replace(' ', '') for x in re.findall(text_reg, s)]
@@ -102,13 +102,3 @@ def post_process(s: str):
             break
     return s
 
-
-@contextlib.contextmanager
-def in_model_path():
-    model_path = os.path.join(os.path.dirname(__file__), 'model')
-    saved = os.getcwd()
-    os.chdir(model_path)
-    try:
-        yield
-    finally:
-        os.chdir(saved)

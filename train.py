@@ -13,17 +13,17 @@ from torchtext.data import metrics
 from tqdm.auto import tqdm
 
 import dataset
+from dataset import I2LDataset # keep, needed when loading pickles
 import utils
 from model import get_model, Model
-from utils import in_model_path, parse_args, gpu_memory_check, token2str, post_process, PAD, BOS, EOS
+from utils import parse_args, gpu_memory_check, token2str, post_process, PAD, BOS, EOS
 
 LR_STEP = 30
 
 
 def train(args):
-    dataloader = dataset.load(args.data)
+    dataloader, valdataloader = dataset.load(args.data), dataset.load(args.valdata)
     dataloader.update(**args, test=False)
-    valdataloader = dataset.load(args.valdata)
     valargs = args.copy()
     valargs.update(batchsize=args.testbatchsize, keep_smaller_batches=True, test=True)
     valdataloader.update(**valargs)
@@ -32,7 +32,7 @@ def train(args):
     if torch.cuda.is_available() and not args.no_cuda:
         gpu_memory_check(model, args)
     max_bleu, max_token_acc = 0, 0
-    out_path = os.path.join(args.model_path, args.name)
+    out_path = os.path.join("model/checkpoints", args.name)
     os.makedirs(out_path, exist_ok=True)
 
     if args.load_chkpt:
@@ -62,7 +62,7 @@ def train(args):
                                                                                            j:j + microbatch].bool().to(
                             device)
                         loss = model.data_parallel(im[j:j + microbatch].to(device), device_ids=args.gpu_devices,
-                                                   tgt_seq=tgt_seq, mask=tgt_mask) * microbatch / args.batchsize
+                                                   t=tgt_seq, mask=tgt_mask) * microbatch / args.batchsize
                         loss.backward()
                         total_loss += loss.item()
                         torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
@@ -162,9 +162,8 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true', help='DEBUG')
     parser.add_argument('--resume', help='path to checkpoint folder', action='store_true')
     parsed_args = parser.parse_args()
-    if parsed_args.config is None:
-        with in_model_path():
-            parsed_args.config = os.path.realpath('settings/config.yaml')
+    if not parsed_args.config:
+        parsed_args.config = os.path.realpath('model/config.yaml')
     with open(parsed_args.config, 'r') as f:
         params = yaml.load(f, Loader=yaml.FullLoader)
     args = parse_args(Munch(params), **vars(parsed_args))

@@ -19,7 +19,7 @@ from transformers import PreTrainedTokenizerFast
 from tokenizers import Tokenizer, pre_tokenizers
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
-from utils import in_model_path, PAD_ID, BOS_ID, EOS_ID, PAD, BOS, EOS
+from utils import PAD_ID, BOS_ID, EOS_ID, PAD, BOS, EOS
 
 train_transform = alb.Compose([alb.Compose([alb.ShiftScaleRotate(shift_limit=0, scale_limit=(-.15, 0), rotate_limit=1,
                                                                  border_mode=0, interpolation=3, value=[255, 255, 255],
@@ -38,14 +38,8 @@ test_transform = alb.Compose([alb.ToGray(always_apply=True),
                               albumentations.pytorch.ToTensorV2()])
 
 
-def load(filename):
-    if not os.path.exists(filename):
-        with in_model_path():
-            tempf = os.path.join('', filename)
-            if os.path.exists(tempf):
-                filename = os.path.realpath(tempf)
-    with open(filename, 'rb') as file:
-        return pickle.load(file)
+def load(f):
+    return pickle.load(open(f, 'rb'))
 
 
 class I2LDataset:
@@ -69,14 +63,9 @@ class I2LDataset:
             self.sample_size = len(self.images)
             self.indices = [int(os.path.basename(img).split('.')[0]) for img in self.images]
             self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer)
-            self.shuffle = shuffle
-            self.batchsize = batchsize
-            self.max_seq_len = max_seq_len
-            self.max_dimensions = max_dimensions
-            self.min_dimensions = min_dimensions
-            self.pad = pad
+            self.batchsize, self.shuffle, self.max_seq_len, self.pad = batchsize, shuffle, max_seq_len, pad
+            self.max_dimensions, self.min_dimensions, self.test = max_dimensions, min_dimensions, test
             self.keep_smaller_batches = keep_smaller_batches
-            self.test = test
             try:
                 eqs = open(equations, 'r').read().split('\n')
                 for i, im in tqdm.auto.tqdm(enumerate(self.images), total=len(self.images)):
@@ -88,7 +77,6 @@ class I2LDataset:
                 pass
             self.data = dict(self.data)
             self._get_size()
-
             iter(self)
 
     def __len__(self):
@@ -128,7 +116,7 @@ class I2LDataset:
             return next(self)
         images = []
         for path in list(ims):
-            if not (im := cv2.imread(path)):
+            if (im := cv2.imread(path)) is None:
                 print(path, 'not found!')
                 continue
             im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
@@ -149,7 +137,7 @@ class I2LDataset:
     def _get_size(self):
         self.size = 0
         for k in self.data:
-            self.size += divmod(len(self.data[k]), self.batchsize)[0]
+            self.size += len(self.data[k]) // self.batchsize
 
     def combine(self, x):
         for key in x.data.keys():
@@ -180,11 +168,7 @@ class I2LDataset:
                     temp[k] = self.data[k]
             self.data = temp
         if 'tokenizer' in kwargs:
-            tokenizer_file = kwargs['tokenizer']
-            if not os.path.exists(tokenizer_file):
-                with in_model_path():
-                    tokenizer_file = os.path.realpath(tokenizer_file)
-            self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file)
+            self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=kwargs['tokenizer'])
         self._get_size()
         iter(self)
 
@@ -201,23 +185,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train model', add_help=False)
     parser.add_argument('-i', '--images', type=str, default=None, help='image folder')
     parser.add_argument('-e', '--equations', type=str, default=None, help='equations text file')
-    parser.add_argument('-t', '--tokenizer', default=None, help='pretrained tokenizer file')
+    parser.add_argument('-t', '--tokenizer', default='model/tokenizer.json', help='pretrained tokenizer file')
     parser.add_argument('-o', '--out', type=str, required=True, help='output file')
     parser.add_argument('-s', '--vocab-size', default=8000, type=int, help='vocabulary size when training a tokenizer')
-    if not (args := parser.parse_args()).tokenizer:
-        with in_model_path():
-            args.tokenizer = os.path.realpath(os.path.join('dataset', 'tokenizer.json'))
+    args = parser.parse_args()
     if not args.images and args.equations:
         print('Generate tokenizer')
         generate_tokenizer(args.equations, args.out, args.vocab_size)
     elif args.images and args.equations:
         print('Generate dataset')
-        dataset = None
-        for images, equations in zip(args.images, args.equations):
-            if not dataset:
-                dataset = I2LDataset(equations, images, args.tokenizer)
-            else:
-                dataset.combine(I2LDataset(equations, images, args.tokenizer))
+        dataset = I2LDataset(args.equations, args.images, args.tokenizer)
         dataset.update(batchsize=1, keep_smaller_batches=True)
         dataset.save(args.out)
     else:

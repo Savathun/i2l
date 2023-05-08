@@ -2,7 +2,7 @@ import glob
 import logging
 import os
 import pickle
-from collections import defaultdict
+import collections
 from os.path import join
 import argparse
 import albumentations as alb
@@ -12,13 +12,10 @@ import cv2
 import imagesize
 import numpy
 import torch
-import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 import tqdm.auto
-from transformers import PreTrainedTokenizerFast
-from tokenizers import Tokenizer, pre_tokenizers
-from tokenizers.models import BPE
-from tokenizers.trainers import BpeTrainer
+import transformers
+import tokenizers
 from utils import PAD_ID, BOS_ID, EOS_ID, PAD, BOS, EOS
 
 train_transform = alb.Compose([alb.Compose([alb.ShiftScaleRotate(shift_limit=0, scale_limit=(-.15, 0), rotate_limit=1,
@@ -50,18 +47,17 @@ class I2LDataset:
     max_seq_len = 1024
 
     transform = train_transform
-    data = defaultdict(lambda: [])
+    data = collections.defaultdict(lambda: [])
 
     def __init__(self, equations=None, images=None, tokenizer=None, shuffle=True, batchsize=16, max_seq_len=1024,
                  max_dimensions=(1024, 512), min_dimensions=(32, 32), pad=False, keep_smaller_batches=False,
                  test=False):
-
         if images and equations:
             assert tokenizer
             self.images = [path.replace('\\', '/') for path in glob.glob(join(images, '*.png'))]
             self.sample_size = len(self.images)
             self.indices = [int(os.path.basename(img).split('.')[0]) for img in self.images]
-            self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer)
+            self.tokenizer = transformers.PreTrainedTokenizerFast(tokenizer_file=tokenizer)
             self.batchsize, self.shuffle, self.max_seq_len, self.pad = batchsize, shuffle, max_seq_len, pad
             self.max_dimensions, self.min_dimensions, self.test = max_dimensions, min_dimensions, test
             self.keep_smaller_batches = keep_smaller_batches
@@ -124,8 +120,8 @@ class I2LDataset:
             logging.critical('Images not working: ' ' '.join(list(ims)))
             return None, None
         if self.pad:
-            images = F.pad(images, value=1, pad=(0, self.max_dimensions[0] - images.shape[2:][1], 0,
-                                                 self.max_dimensions[1] - images.shape[2:][0]))
+            images = torch.nn.functional.pad(images, value=1, pad=(0, self.max_dimensions[0] - images.shape[2:][1], 0,
+                                                                   self.max_dimensions[1] - images.shape[2:][0]))
         return tok, images
 
     def _get_size(self): self.size = sum([len(self.data[k]) // self.batchsize for k in self.data])
@@ -144,7 +140,7 @@ class I2LDataset:
             self.data = {k: self.data[k] for k in self.data if self.min_dimensions[0] <= k[0] <= self.max_dimensions[0] and
                          self.min_dimensions[1] <= k[1] <= self.max_dimensions[1]}
         if 'tokenizer' in kwargs:
-            self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=kwargs['tokenizer'])
+            self.tokenizer = transformers.PreTrainedTokenizerFast(tokenizer_file=kwargs['tokenizer'])
         self._get_size()
         iter(self)
 
@@ -152,7 +148,7 @@ class I2LDataset:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train model', add_help=False)
     parser.add_argument('-i', '--images', type=str, default=None, help='image folder')
-    parser.add_argument('-e', '--equations', type=str, default='model/data/formulae.txt', help='equations text file')
+    parser.add_argument('-e', '--equations', type=str, default=r'C:\Users\djsch\Documents\GitHub\i2l\model\data\formulae.txt', help='equations text file')
     parser.add_argument('-t', '--tokenizer', default='model/tokenizer.json', help='pretrained tokenizer file')
     parser.add_argument('-o', '--out', type=str, help='output file')
     parser.add_argument('-s', '--vocab-size', default=8000, type=int, help='vocabulary size when training a tokenizer')
@@ -160,11 +156,11 @@ if __name__ == '__main__':
     if not args.images:
         if not args.out: args.out = args.tokenizer
         print('Generate tokenizer')
-        tokenizer = Tokenizer(BPE())
-        tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
-        trainer = BpeTrainer(special_tokens=[PAD, BOS, EOS], vocab_size=args.vocab_size, show_progress=True)
-        tokenizer.train(args.equations, trainer)
-        tokenizer.save(path=args.out, pretty=False)
+        tokenizer = tokenizers.Tokenizer(tokenizers.models.BPE())
+        tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.ByteLevel(add_prefix_space=False)
+        tokenizer.train([args.equations], tokenizers.trainers.BpeTrainer(special_tokens=[PAD, BOS, EOS],
+                                                                         vocab_size=args.vocab_size, show_progress=True))
+        tokenizer.save(args.out)
     elif args.images:
         if not args.out: args.out = args.images + ".pkl"
         print('Generate dataset pickles')

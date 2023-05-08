@@ -5,46 +5,49 @@
   "added_tokens": [
     {
       "id": 0,
-      "special": true,
       "content": "[PAD]",
       "single_word": false,
       "lstrip": false,
       "rstrip": false,
-      "normalized": false
+      "normalized": false,
+      "special": true
     },
     {
       "id": 1,
-      "special": true,
       "content": "[BOS]",
       "single_word": false,
       "lstrip": false,
       "rstrip": false,
-      "normalized": false
+      "normalized": false,
+      "special": true
     },
     {
       "id": 2,
-      "special": true,
       "content": "[EOS]",
       "single_word": false,
       "lstrip": false,
       "rstrip": false,
-      "normalized": false
+      "normalized": false,
+      "special": true
     }
   ],
   "normalizer": null,
   "pre_tokenizer": {
     "type": "ByteLevel",
     "add_prefix_space": false,
-    "trim_offsets": true
+    "trim_offsets": true,
+    "use_regex": true
   },
   "post_processor": null,
   "decoder": null,
   "model": {
+    "type": "BPE",
     "dropout": null,
     "unk_token": null,
     "continuing_subword_prefix": null,
     "end_of_word_suffix": null,
     "fuse_unk": false,
+    "byte_fallback": false,
     "vocab": {
       "[PAD]": 0,
       "[BOS]": 1,

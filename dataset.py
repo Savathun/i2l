@@ -152,22 +152,22 @@ class I2LDataset:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train model', add_help=False)
     parser.add_argument('-i', '--images', type=str, default=None, help='image folder')
-    parser.add_argument('-e', '--equations', type=str, default=None, help='equations text file')
+    parser.add_argument('-e', '--equations', type=str, default='model/data/formulae.txt', help='equations text file')
     parser.add_argument('-t', '--tokenizer', default='model/tokenizer.json', help='pretrained tokenizer file')
-    parser.add_argument('-o', '--out', type=str, required=True, help='output file')
+    parser.add_argument('-o', '--out', type=str, help='output file')
     parser.add_argument('-s', '--vocab-size', default=8000, type=int, help='vocabulary size when training a tokenizer')
     args = parser.parse_args()
-    if not args.images and args.equations:
+    if not args.images:
+        if not args.out: args.out = args.tokenizer
         print('Generate tokenizer')
         tokenizer = Tokenizer(BPE())
         tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
         trainer = BpeTrainer(special_tokens=[PAD, BOS, EOS], vocab_size=args.vocab_size, show_progress=True)
         tokenizer.train(args.equations, trainer)
         tokenizer.save(path=args.out, pretty=False)
-    elif args.images and args.equations:
-        print('Generate dataset')
+    elif args.images:
+        if not args.out: args.out = args.images + ".pkl"
+        print('Generate dataset pickles')
         dataset = I2LDataset(args.equations, args.images, args.tokenizer)
         dataset.update(batchsize=1, keep_smaller_batches=True)
         dataset.save(args.out)
-    else:
-        print('Not defined')

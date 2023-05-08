@@ -38,8 +38,7 @@ test_transform = alb.Compose([alb.ToGray(always_apply=True),
                               albumentations.pytorch.ToTensorV2()])
 
 
-def load(f):
-    return pickle.load(open(f, 'rb'))
+def load(f: str): return pickle.load(open(f, 'rb'))
 
 
 class I2LDataset:
@@ -73,14 +72,12 @@ class I2LDataset:
                     if min_dimensions[0] <= width <= max_dimensions[0] and \
                             min_dimensions[1] <= height <= max_dimensions[1]:
                         self.data[(width, height)].append((eqs[self.indices[i]], im))
-            except KeyboardInterrupt:
-                pass
+            except KeyboardInterrupt: pass
             self.data = dict(self.data)
             self._get_size()
             iter(self)
 
-    def __len__(self):
-        return self.size
+    def __len__(self): return self.size
 
     def __iter__(self):
         self.i = 0
@@ -96,10 +93,8 @@ class I2LDataset:
                 if len(batch) < self.batchsize and not self.keep_smaller_batches:
                     continue
                 self.pairs.append(batch)
-        if self.shuffle:
-            self.pairs = numpy.random.permutation(numpy.array(self.pairs, dtype=object))
-        else:
-            self.pairs = numpy.array(self.pairs, dtype=object)
+        self.pairs = numpy.random.permutation(numpy.array(
+            self.pairs, object)) if self.shuffle else numpy.array(self.pairs, object)
         self.size = len(self.pairs)
         return self
 
@@ -110,8 +105,7 @@ class I2LDataset:
         eqs, ims = self.pairs[self.i - 1].T
         tok = self.tokenizer(list(eqs), return_token_type_ids=False)
         for k, p in zip(tok, [[BOS_ID, EOS_ID], [1, 1]]):
-            tok[k] = pad_sequence([torch.LongTensor([p[0]] + x + [p[1]]) for x in tok[k]], batch_first=True,
-                                  padding_value=PAD_ID)
+            tok[k] = pad_sequence([torch.LongTensor([p[0]] + x + [p[1]]) for x in tok[k]], True, PAD_ID)
         if self.max_seq_len < tok['attention_mask'].shape[1]:
             return next(self)
         images = []
@@ -130,27 +124,13 @@ class I2LDataset:
             logging.critical('Images not working: ' ' '.join(list(ims)))
             return None, None
         if self.pad:
-            images = F.pad(images, (0, self.max_dimensions[0] - images.shape[2:][1], 0,
-                                    self.max_dimensions[1] - images.shape[2:][0]), value=1)
+            images = F.pad(images, value=1, pad=(0, self.max_dimensions[0] - images.shape[2:][1], 0,
+                                                 self.max_dimensions[1] - images.shape[2:][0]))
         return tok, images
 
-    def _get_size(self):
-        self.size = 0
-        for k in self.data:
-            self.size += len(self.data[k]) // self.batchsize
+    def _get_size(self): self.size = sum([len(self.data[k]) // self.batchsize for k in self.data])
 
-    def combine(self, x):
-        for key in x.data.keys():
-            if key in self.data.keys():
-                self.data[key].extend(x.data[key])
-                self.data[key] = list(set(self.data[key]))
-            else:
-                self.data[key] = x.data[key]
-        self._get_size()
-        iter(self)
-
-    def save(self, filename):
-        pickle.dump(self, open(filename, 'wb'))
+    def save(self, filename: str): pickle.dump(self, open(filename, 'wb'))
 
     def update(self, **kwargs):
         for k in ['batchsize', 'shuffle', 'pad', 'keep_smaller_batches', 'test', 'max_seq_len']:
@@ -161,24 +141,12 @@ class I2LDataset:
                 self.max_dimensions = kwargs['max_dimensions']
             if 'min_dimensions' in kwargs:
                 self.min_dimensions = kwargs['min_dimensions']
-            temp = {}
-            for k in self.data:
-                if self.min_dimensions[0] <= k[0] <= self.max_dimensions[0] and self.min_dimensions[1] <= k[1] <= \
-                        self.max_dimensions[1]:
-                    temp[k] = self.data[k]
-            self.data = temp
+            self.data = {k: self.data[k] for k in self.data if self.min_dimensions[0] <= k[0] <= self.max_dimensions[0] and
+                         self.min_dimensions[1] <= k[1] <= self.max_dimensions[1]}
         if 'tokenizer' in kwargs:
             self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=kwargs['tokenizer'])
         self._get_size()
         iter(self)
-
-
-def generate_tokenizer(equations, output, vocab_size):
-    tokenizer = Tokenizer(BPE())
-    tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
-    trainer = BpeTrainer(special_tokens=[PAD, BOS, EOS], vocab_size=vocab_size, show_progress=True)
-    tokenizer.train(equations, trainer)
-    tokenizer.save(path=output, pretty=False)
 
 
 if __name__ == '__main__':
@@ -191,7 +159,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if not args.images and args.equations:
         print('Generate tokenizer')
-        generate_tokenizer(args.equations, args.out, args.vocab_size)
+        tokenizer = Tokenizer(BPE())
+        tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+        trainer = BpeTrainer(special_tokens=[PAD, BOS, EOS], vocab_size=args.vocab_size, show_progress=True)
+        tokenizer.train(args.equations, trainer)
+        tokenizer.save(path=args.out, pretty=False)
     elif args.images and args.equations:
         print('Generate dataset')
         dataset = I2LDataset(args.equations, args.images, args.tokenizer)

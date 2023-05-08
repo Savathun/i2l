@@ -16,7 +16,7 @@ import dataset
 from dataset import I2LDataset # keep, needed when loading pickles
 import utils
 from model import get_model, Model
-from utils import parse_args, gpu_memory_check, token2str, post_process, PAD, BOS, EOS
+from utils import parse_args, check_mem, tok2str, post_process, PAD, BOS, EOS
 
 LR_STEP = 30
 
@@ -30,13 +30,13 @@ def train(args):
     device = args.device
     model = get_model(args)
     if torch.cuda.is_available() and not args.no_cuda:
-        gpu_memory_check(model, args)
+        check_mem(model, args)
     max_bleu, max_token_acc = 0, 0
     out_path = os.path.join("model/checkpoints", args.name)
     os.makedirs(out_path, exist_ok=True)
 
-    if args.load_chkpt:
-        model.load_state_dict(torch.load(args.load_chkpt, map_location=device))
+    if args.load_ckpt:
+        model.load_state_dict(torch.load(args.load_ckpt, map_location=device))
 
     def save_models(e, step=0):
         torch.save(model.state_dict(), os.path.join(out_path, f'{args.name}_e{e + 1:02d}_step{step:02d}.pth'))
@@ -45,9 +45,9 @@ def train(args):
     opt = torch.optim.Adam(model.parameters(), args.lr, betas=args.betas)
     scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=LR_STEP, gamma=args.gamma)
 
-    microbatch = args.get('micro_batchsize', -1)
-    if microbatch == -1:
-        microbatch = args.batchsize
+    micro_batch = args.get('micro_batchsize', -1)
+    if micro_batch == -1:
+        micro_batch = args.batchsize
 
     try:
         for e in range(args.epoch, args.epochs):
@@ -57,12 +57,12 @@ def train(args):
                 if seq is not None and im is not None:
                     opt.zero_grad()
                     total_loss = 0
-                    for j in range(0, len(im), microbatch):
-                        tgt_seq, tgt_mask = seq['input_ids'][j:j + microbatch].to(device), seq['attention_mask'][
-                                                                                           j:j + microbatch].bool().to(
+                    for j in range(0, len(im), micro_batch):
+                        tgt_seq, tgt_mask = seq['input_ids'][j:j + micro_batch].to(device), seq['attention_mask'][
+                                                                                           j:j + micro_batch].bool().to(
                             device)
-                        loss = model.data_parallel(im[j:j + microbatch].to(device), device_ids=args.gpu_devices,
-                                                   t=tgt_seq, mask=tgt_mask) * microbatch / args.batchsize
+                        loss = model.data_parallel(im[j:j + micro_batch].to(device), device_ids=args.gpu_devices,
+                                                   t=tgt_seq, mask=tgt_mask) * micro_batch / args.batchsize
                         loss.backward()
                         total_loss += loss.item()
                         torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
@@ -102,19 +102,17 @@ def evaluate(model: Model, dataset: dataset.I2LDataset, args: Munch, num_batches
         return toks
 
     assert len(dataset) > 0
-    device = args.device
-    log = {}
-    bleus, edit_dists, token_acc = [], [], []
+    bleus, edit_dists, token_acc, log = [], [], [], {}
     bleu_score, edit_distance, token_accuracy = 0, 1, 0
     pbar = tqdm(enumerate(iter(dataset)), total=len(dataset))
     for i, (seq, im) in pbar:
         if seq is None or im is None:
             continue
-        dec = model.generate(im.to(device), temperature=args.get('temperature', .2))
+        dec = model.generate(im.to(args.device), temperature=args.get('temperature', .2))
         pred = detokenize(dec, dataset.tokenizer)
         truth = detokenize(seq['input_ids'], dataset.tokenizer)
         bleus.append(metrics.bleu_score(pred, [[x] for x in truth]))
-        for predi, truthi in zip(token2str(dec, dataset.tokenizer), token2str(seq['input_ids'], dataset.tokenizer)):
+        for predi, truthi in zip(tok2str(dec, dataset.tokenizer), tok2str(seq['input_ids'], dataset.tokenizer)):
             ts = post_process(truthi)
             if len(ts) > 0:
                 edit_dists.append(Levenshtein.distance(post_process(predi), ts) / len(ts))
@@ -141,10 +139,9 @@ def evaluate(model: Model, dataset: dataset.I2LDataset, args: Munch, num_batches
         token_accuracy = numpy.mean(token_acc)
         log[name + '/token_acc'] = token_accuracy
     if args.wandb:
-        # samples
-        pred = token2str(dec, dataset.tokenizer)
-        truth = token2str(seq['input_ids'], dataset.tokenizer)
-        table = wandb.Table(columns=["Truth", "Prediction"])
+        pred = tok2str(dec, dataset.tokenizer)
+        truth = tok2str(seq['input_ids'], dataset.tokenizer)
+        table = wandb.Table(["Truth", "Prediction"])
         for k in range(min([len(pred), args.test_samples])):
             table.add_data(post_process(truth[k]), post_process(pred[k]))
         log[name + '/examples'] = table
@@ -164,9 +161,7 @@ if __name__ == '__main__':
     parsed_args = parser.parse_args()
     if not parsed_args.config:
         parsed_args.config = os.path.realpath('model/config.yaml')
-    with open(parsed_args.config, 'r') as f:
-        params = yaml.load(f, Loader=yaml.FullLoader)
-    args = parse_args(Munch(params), **vars(parsed_args))
+    args = parse_args(Munch(yaml.load(open(parsed_args.config, 'r'), Loader=yaml.FullLoader)), **vars(parsed_args))
     logging.getLogger().setLevel(logging.DEBUG if parsed_args.debug else logging.WARNING)
     random.seed(args.seed)
     os.environ['PYTHONHASHSEED'] = str(args.seed)

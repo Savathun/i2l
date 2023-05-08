@@ -4,6 +4,7 @@ import timm.models
 from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper, autoregressive_wrapper
 import einops
 import utils
+import wandb
 
 ENCODER_DEPTH = 4
 HEADS = 8
@@ -31,14 +32,12 @@ class Model(nn.Module):
     @torch.no_grad()
     def generate(self, x: torch.Tensor, temperature=0.25):
         return self.decoder.generate((torch.LongTensor([utils.BOS_ID] * len(x))[:, None]).to(x.device),
-                                     self.args.max_seq_len,
-                                     context=self.encoder(x), temperature=temperature)
+                                     self.args.max_seq_len, context=self.encoder(x), temperature=temperature)
 
 
 def get_model(args):
     class ARWrapperWithCustomGenerate(AutoregressiveWrapper):
-        def __init__(self, *args, **kwargs):
-            super(ARWrapperWithCustomGenerate, self).__init__(*args, **kwargs)
+        def __init__(self, *args, **kwargs): super(ARWrapperWithCustomGenerate, self).__init__(*args, **kwargs)
 
         @torch.no_grad()
         def generate(self, start_tokens, seq_len=256, temperature=1., filter_logits_fn=autoregressive_wrapper.top_k,
@@ -67,20 +66,18 @@ def get_model(args):
             return out
 
     decoder = ARWrapperWithCustomGenerate(TransformerWrapper(num_tokens=args.num_tokens, max_seq_len=args.max_seq_len,
-                                                 attn_layers=Decoder(dim=args.dim, depth=ENCODER_LAYERS,
-                                                                     heads=HEADS, **args.decoder_args)),
+                                                             attn_layers=Decoder(dim=args.dim, depth=ENCODER_LAYERS,
+                                                                                 heads=HEADS, **args.decoder_args)),
                                           pad_value=utils.PAD_ID)
     model = Model(get_encoder(args).to(args.device), decoder.to(args.device), args)
     if args.wandb:
-        import wandb
         wandb.watch(model)
-
     return model
 
 
 def get_encoder(args):
     class ViTWithCustomForward(timm.models.vision_transformer.VisionTransformer):
-        def __init__(self, img_size=224, patch_size=16, *args, **kwargs):
+        def __init__(self, img_size: int | tuple[int, ...] = 224, patch_size=16, *args, **kwargs):
             super(ViTWithCustomForward, self).__init__(img_size=img_size, patch_size=patch_size, *args, **kwargs)
             self.height, self.width = img_size
             self.patch_size = patch_size
@@ -108,6 +105,6 @@ def get_encoder(args):
         return timm.models.vision_transformer_hybrid.HybridEmbed(**x, patch_size=ps // min_patch_size,
                                                                  backbone=backbone)
 
-    return ViTWithCustomForward(img_size=(args.max_height, args.max_width), patch_size=args.patch_size,
-                                      in_chans=utils.CHANNELS, num_classes=0, embed_dim=args.dim,
-                                      depth=ENCODER_DEPTH, num_heads=HEADS, embed_layer=embed_layer)
+    return ViTWithCustomForward((args.max_height, args.max_width), args.patch_size,
+                                in_chans=utils.CHANNELS, num_classes=0, embed_dim=args.dim,
+                                depth=ENCODER_DEPTH, num_heads=HEADS, embed_layer=embed_layer)

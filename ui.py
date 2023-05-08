@@ -5,8 +5,7 @@ import ui_backend
 
 
 @st.cache_resource
-def get_backend():
-    return ui_backend.Image2Latex()
+def get_backend(): return ui_backend.Image2Latex()
 
 
 if __name__ == '__main__':

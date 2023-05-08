@@ -4,7 +4,6 @@ betas: [0.9, 0.999]
 batchsize: 16
 checkpoint: model/checkpoints/weights.pth
 data: model/data/train.pkl
-debug: false
 decoder_args:
   attn_on_attn: true
   cross_attend: true
@@ -15,7 +14,7 @@ dim: 256
 epochs: 100
 gamma: 0.9995
 id: null
-load_chkpt: model/checkpoints/weights.pth
+load_ckpt: model/checkpoints/weights.pth
 lr: 0.001
 max_height: 192
 max_seq_len: 512
@@ -25,7 +24,6 @@ min_height: 32
 min_width: 32
 name: i2l
 num_tokens: 8000
-output_path: model/outputs
 pad: false
 patch_size: 16
 sample_freq: 3000

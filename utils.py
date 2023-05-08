@@ -1,5 +1,4 @@
-import contextlib
-import os
+import math
 import re
 
 import cv2
@@ -10,44 +9,36 @@ import munch
 
 CHANNELS = 1
 PAD_ID, BOS_ID, EOS_ID = 0, 1, 2
-PAD = "[PAD]"
-BOS = "[BOS]"
-EOS = "[EOS]"
+PAD, BOS, EOS = "[PAD]", "[BOS]", "[EOS]"
 
 
 def parse_args(args, **kwargs) -> munch.Munch:
-    args = munch.Munch({'epoch': 0}, **args)
+    args = munch.Munch({'epoch': 0, 'decoder_args': {}, 'min_width': 32, 'min_height': 32, 'no_cuda': False,
+                        'checkpoint': 'model/checkpoints/weights.pth'}, **args)
 
-    def get_device(no_cuda=False):
+    def get_device() -> str:
         device = 'cpu'
         available_gpus = torch.cuda.device_count()
         args.gpu_devices = args.gpu_devices if args.get('gpu_devices', False) else list(range(available_gpus))
-        if available_gpus > 0 and not no_cuda:
+        if available_gpus > 0 and not args.no_cuda:
             device = f'cuda:{args.gpu_devices[0]:d}' if args.gpu_devices else 0
             assert available_gpus >= len(
                 args.gpu_devices), f"Available {available_gpus:d} gpu, but specified gpu {','.join(map(str, args.gpu_devices))}."
             assert max(
                 args.gpu_devices) < available_gpus, f"legal gpu_devices should in [{','.join(map(str, range(available_gpus)))}], received [{','.join(map(str, args.gpu_devices))}]"
         return device
-
-    kwargs = munch.Munch({'no_cuda': False}, **kwargs)
-    args.update(kwargs)
-    args.device = get_device(kwargs.no_cuda)
-    args.max_dimensions = [args.max_width, args.max_height]
-    args.min_dimensions = [args.get('min_width', 32), args.get('min_height', 32)]
-    if 'decoder_args' not in args or not args.decoder_args:
-        args.decoder_args = {}
-    return args
+    return munch.Munch(args, device=get_device(), max_dimensions=[args.max_width, args.max_height],
+                       min_dimensions=[args.min_width, args.min_height], **kwargs)
 
 
-def gpu_memory_check(model, args):
+def check_mem(model, args) -> None:
     try:
         batch_size = args.batchsize if args.get('micro_batchsize', -1) == -1 else args.micro_batchsize
         for _ in range(5):
-            im = torch.empty(batch_size, CHANNELS, args.max_height, args.min_height, device=args.device).float()
-            seq = torch.randint(0, args.num_tokens, (batch_size, args.max_seq_len), device=args.device).long()
-            loss = model.data_parallel(im, device_ids=args.gpu_devices, t=seq)
-            loss.sum().backward()
+            model.data_parallel(
+                torch.empty(batch_size, CHANNELS, args.max_height, args.min_height, device=args.device).float(),
+                args.gpu_devices, t=torch.randint(0, args.num_tokens, (batch_size, args.max_seq_len),
+                                                  device=args.device).long()).sum().backward()
     except RuntimeError:
         raise RuntimeError(
             f"The system cannot handle a batch size of {batch_size} for the maximum "
@@ -55,14 +46,13 @@ def gpu_memory_check(model, args):
     model.zero_grad()
     with torch.cuda.device(args.device):
         torch.cuda.empty_cache()
-    del im, seq
 
 
-def token2str(tokens, tokenizer) -> list:
+def tok2str(tokens, tokenizer) -> list:
     if len(tokens.shape) == 1:
         tokens = tokens[None, :]
-    return [''.join(d.split(' ')).replace('Ġ', ' ').replace(EOS, '').replace(BOS, '').replace(PAD, '').strip()
-            for d in [tokenizer.decode(tok) for tok in tokens]]
+    return [re.sub(fr'(Ġ)|(\{PAD}|\{BOS}|\{EOS}| )', lambda m: ' ' if m.group(1) else '' if m.group(2) else None,
+                   tokenizer.decode(tok)).strip() for tok in tokens]
 
 
 def pad(img: Image, divisor=32) -> Image:
@@ -77,28 +67,16 @@ def pad(img: Image, divisor=32) -> Image:
         gray = 255 * (data > threshold).astype(numpy.uint8)
         data = 255 - data
     a, b, w, h = cv2.boundingRect(cv2.findNonZero(gray))
-    dims = []
-    for x in [w, h]:
-        div, mod = divmod(x, divisor)
-        dims.append(divisor * (div + (1 if mod > 0 else 0)))
-    padded = Image.new('L', dims, 255)
+    padded = Image.new('L', [divisor * math.ceil(x/divisor) for x in [w, h]], 255)
     im = Image.fromarray(data[b:b + h, a:a + w]).convert('L')
     padded.paste(im, (0, 0, im.size[0], im.size[1]))
     return padded
 
 
 def post_process(s: str) -> str:
-    text_reg = r'(\\(operatorname|mathrm|text|mathbf)\s?\*? {.*?})'
-    letter, no_letter = '[a-zA-Z]', r'[\W_^\d]'
-    names = [x[0].replace(' ', '') for x in re.findall(text_reg, s)]
-    s = re.sub(text_reg, lambda match: str(names.pop(0)), s)
-    news = s
-    while True:
-        s = news
-        news = re.sub(fr'(?!\\ )({no_letter})\s+?({no_letter})', r'\1\2', s)
-        news = re.sub(fr'(?!\\ )({no_letter})\s+?({letter})', r'\1\2', news)
-        news = re.sub(fr'({letter})\s+?({no_letter})', r'\1\2', news)
-        if news == s:
-            break
-    return s
+    result = re.sub(r"(\\(?:operatorname|mathrm|text|mathbf))\s?(\*?)\s?({)\s?(.*?)\s?(})", r"\1\2\3\4\5", s)
+    sub = lambda m: m.expand(r'\2\4') if m.group(2) and m.group(4) else m.expand(r'\3\5') if m.group(3) and m.group(5) else m.group(0)
+    while (news := re.sub(r"(?!\\ )(([\W_^\d])|([a-zA-Z]))\s+?(([\W_^\d])|([a-zA-Z]))", sub, result)) != result:
+        result = news
+    return result
 
